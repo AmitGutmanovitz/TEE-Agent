@@ -1,0 +1,4 @@
+# Keep LF everywhere: the CVM compose file is hashed into the TEE measurement,
+# so a CRLF checkout would change its compose hash and break verify.py --expect-compose.
+* text=auto eol=lf
+*.ps1 text eol=crlf

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verifiable Agent</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e2e1dc; --accent:#2f6fde; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#191918; --panel:#232321; --ink:#ecebe6; --muted:#a3a29c; --line:#3a3936; --accent:#7aa7ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px; display:grid; gap:16px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  h1 { font-size:20px; margin:0; } h2 { font-size:14px; margin:0 0 8px; color:var(--muted); font-weight:600; }
+  textarea, input { width:100%; font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:8px; padding:8px; }
+  button { font:inherit; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; padding:6px 14px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); }
+  .row { display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap; }
+  .msg { padding:8px 0; border-bottom:1px solid var(--line); white-space:pre-wrap; }
+  .msg b { color:var(--muted); font-weight:600; }
+  .proof { font:12px/1.4 ui-monospace, monospace; color:var(--muted); margin-top:4px; word-break:break-all; }
+  code { font-family: ui-monospace, monospace; }
+  .hash { font:12px ui-monospace, monospace; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Verifiable agent on Phala</h1>
+  <div id="backend" class="hash"></div>
+  <section id="authbox">
+    <h2>Access token</h2>
+    <div class="row"><input id="token" type="password" placeholder="Chat token, or admin token to change the prompt"><button onclick="saveToken()">Use token</button></div>
+  </section>
+  <section>
+    <h2>System prompt</h2>
+    <textarea id="prompt" rows="3"></textarea>
+    <div class="row"><button onclick="savePrompt()">Save prompt</button><span class="hash" id="phash"></span></div>
+  </section>
+  <section>
+    <h2>Chat</h2>
+    <div id="log"></div>
+    <div class="row"><input id="msg" placeholder="Type a message and press Enter" onkeydown="if(event.key==='Enter')send()"></div>
+    <div class="row"><button onclick="send()">Send</button><button class="ghost" onclick="reset()">New conversation</button></div>
+  </section>
+  <section>
+    <h2>Verify an answer</h2>
+    Each answer has a proof id. Verify it outside the agent, so you don't have to trust it:
+    <pre><code>.\.venv\Scripts\python agent-poc\verifier\verify.py &lt;proof_id&gt;</code></pre>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = '';
+try { token = sessionStorage.getItem('agent-token') || ''; } catch (e) {}
+const hdrs = () => Object.assign({'Content-Type': 'application/json'}, token ? {'Authorization': 'Bearer ' + token} : {});
+function saveToken() {
+  token = $('token').value.trim();
+  try { sessionStorage.setItem('agent-token', token); } catch (e) {}
+  loadPrompt();
+}
+async function loadPrompt() {
+  const r = await fetch('/system-prompt', {headers: hdrs()});
+  if (!r.ok) { $('phash').textContent = r.status === 401 ? 'enter a token above' : r.statusText; return; }
+  const j = await r.json();
+  $('prompt').value = j.prompt; $('phash').textContent = 'sha256 ' + j.sha256.slice(0, 16) + '…';
+}
+async function savePrompt() {
+  const r = await fetch('/system-prompt', {method:'PUT', headers: hdrs(), body: JSON.stringify({prompt: $('prompt').value})});
+  if (!r.ok) { $('phash').textContent = r.status === 401 ? 'admin token required' : r.statusText; return; }
+  const j = await r.json();
+  $('phash').textContent = 'saved, sha256 ' + j.sha256.slice(0, 16) + '…';
+}
+function add(who, text, proof) {
+  const d = document.createElement('div'); d.className = 'msg';
+  const b = document.createElement('b'); b.textContent = who + ': '; d.append(b, document.createTextNode(text));
+  if (proof) { const p = document.createElement('div'); p.className = 'proof'; p.textContent = proof; d.append(p); }
+  $('log').append(d);
+}
+async function send() {
+  const m = $('msg').value.trim(); if (!m) return; $('msg').value = ''; add('You', m);
+  const r = await fetch('/chat', {method:'POST', headers: hdrs(), body: JSON.stringify({message: m})});
+  const j = await r.json();
+  if (!r.ok) return add('Error', j.detail || r.statusText);
+  const s = j.statement, tee = s.tee_verified_inference ? 'TEE-verified inference' : 'NOT TEE-verified';
+  add('Agent', j.answer, `${s.backend} · ${s.model} · ${tee} · proof_id ${j.proof_id} · receipt ${s.receipt_id || '-'} · ${s.usage.prompt_tokens}+${s.usage.completion_tokens} tokens · ${s.latency_ms} ms`);
+}
+fetch('/info').then(r => r.json()).then(i => {
+  $('backend').textContent = `LLM backend: ${i.backend} (${i.model}) · ` +
+    (i.tee_verified_inference ? 'inference runs in a TEE, answers are verifiable' : 'NOT TEE-verified: for development and cost tests only') +
+    ` · agent TEE: ${i.tee_mode}`;
+  if (!i.auth.admin && !i.auth.chat) $('authbox').style.display = 'none';
+});
+async function reset() { await fetch('/reset', {method:'POST', headers: hdrs(), body:'{}'}); $('log').innerHTML = ''; }
+loadPrompt();
+</script>
+</body>
+</html>

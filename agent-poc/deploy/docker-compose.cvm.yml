@@ -1,0 +1,32 @@
+services:
+  agent:
+    image: amitgut3210/verifiable-agent@sha256:24742b4b0398a90292748cfcfae2d7eecbc36e6173c7d492afc69858d811372b # agent-image
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - agent-data:/data
+    environment:
+      - LLM_BACKEND=phala
+      - PHALA_API_KEY=${PHALA_API_KEY}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - CHAT_TOKEN=${CHAT_TOKEN}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  demo:
+    image: amitgut3210/verifiable-agent-demo@sha256:24e0b1b68c65d30efc8cdde3a296855be2cc3ebb777ae55810a30bdab31f26cd # demo-image
+    ports:
+      - "8080:8080"
+    environment:
+      - AGENT_URL=http://agent:8000
+      - PHALA_API_KEY=${PHALA_API_KEY}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - CHAT_TOKEN=${CHAT_TOKEN}
+      - DEMO_TOKEN=${DEMO_TOKEN}
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+volumes:
+  agent-data:

@@ -1,0 +1,23 @@
+# Local stand-in for a Phala dstack CVM.
+#
+#   tappd-sim   : Phala's TEE simulator. Inside a real Phala CVM this service is
+#                 the guest agent ("tappd"/"dstack" socket) that talks to the
+#                 Intel TDX hardware and the KMS. Here it fakes both.
+#   calc-server : our app. It only ever talks to the TEE through the simulator's
+#                 API, exactly like it would on real hardware.
+services:
+  tappd-sim:
+    image: phalanetwork/tappd-simulator:latest
+    container_name: tappd-sim
+    # Not published to the host on purpose: only the app inside the "CVM" may use it.
+
+  calc-server:
+    build: ./server
+    container_name: calc-server
+    environment:
+      DSTACK_SIMULATOR_ENDPOINT: http://tappd-sim:8090
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - tappd-sim

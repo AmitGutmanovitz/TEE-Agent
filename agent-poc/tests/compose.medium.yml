@@ -1,0 +1,6 @@
+# Caps the agent at Phala tdx.medium size (2 vCPU, 4 GB). Use with:
+#   docker compose -f docker-compose.yml -f tests/compose.medium.yml up -d
+services:
+  agent:
+    cpus: 2
+    mem_limit: 4g

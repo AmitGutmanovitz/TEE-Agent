@@ -1,0 +1,45 @@
+# Verifiable AI agent. Locally: agent + dstack simulator.
+# On a Phala CVM: delete the dstack-sim service and DSTACK_SIMULATOR_ENDPOINT,
+# and mount /var/run/dstack.sock instead (see README). The agent code is unchanged.
+#
+# LLM backend:  LLM_BACKEND=phala  (default; inference in a TEE, verifiable receipts;
+#                                   cheapest chat model qwen/qwen-2.5-7b-instruct)
+#               LLM_BACKEND=gemini (NOT TEE-verified)
+#               LLM_BACKEND=openai (NOT TEE-verified)
+# Switch with:  $env:LLM_BACKEND="phala"; docker compose up -d
+services:
+  dstack-sim:
+    image: phalanetwork/tappd-simulator:latest
+
+  agent:
+    build: ./agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env          # API keys: GEMINI_API_KEY, PHALA_API_KEY, OPEN_AI_API_KEY
+        required: false
+    environment:
+      DSTACK_SIMULATOR_ENDPOINT: http://dstack-sim:8090
+      LLM_BACKEND: ${LLM_BACKEND:-phala}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - agent-data:/data     # proofs database survives restarts
+    depends_on:
+      - dstack-sim
+
+  demo:                      # demo page: run a test + see the verification report (http://localhost:8080)
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env           # PHALA_API_KEY (receipts), ADMIN_TOKEN, CHAT_TOKEN
+        required: false
+    environment:
+      AGENT_URL: http://agent:8000
+    depends_on:
+      - agent
+
+volumes:
+  agent-data:

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verifiable AI Demo</title>
+<style>
+  :root { --bg:#f6f6f3; --panel:#fff; --ink:#1c1c1a; --muted:#686862; --line:#e3e2dc; --accent:#2f6fde; --accent-ink:#fff;
+          --ok:#1a7f37; --ok-bg:#e8f5ec; --bad:#c62828; --bad-bg:#fdecec; --chip:#f0efea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#181817; --panel:#222220; --ink:#ecebe6; --muted:#a2a19b; --line:#383734;
+          --accent:#7aa7ff; --accent-ink:#0d1626; --ok:#5cc472; --ok-bg:#16301d; --bad:#ff7070; --bad-bg:#3a1a1a; --chip:#2c2c29; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+  .grid { display:grid; grid-template-columns: minmax(0,1.15fr) minmax(0,0.85fr); gap:16px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  label { display:block; font-weight:600; font-size:13px; margin: 0 0 6px; }
+  textarea, input { width:100%; font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:8px; padding:10px; resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 14px; }
+  .chip { background:var(--chip); border:1px solid var(--line); border-radius:99px; padding:4px 10px; font-size:13px; cursor:pointer; color:inherit; }
+  details { margin: 4px 0 14px; } summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  button.run { width:100%; background:var(--accent); color:var(--accent-ink); border:0; border-radius:8px; padding:12px; font:600 15px system-ui; cursor:pointer; }
+  button.run:disabled { opacity:.55; cursor:default; }
+  .proves li { margin: 6px 0; } .proves { padding-left: 18px; margin: 0; }
+  .muted { color:var(--muted); font-size:13px; }
+  .progress { display:none; margin-top:14px; } .progress.on { display:block; }
+  .steps { list-style:none; padding:0; margin:8px 0 0; } .steps li { padding:4px 0; color:var(--muted); font-size:14px; }
+  .steps li.done { color:var(--ink); } .steps li.done::before { content:"\2713  "; color:var(--ok); font-weight:700; }
+  .steps li.now::before { content:"\25CF  "; color:var(--accent); } .steps li.todo::before { content:"\25CB  "; }
+  .result { display:none; margin-top:16px; } .result.on { display:block; }
+  .verdict { display:flex; align-items:center; gap:12px; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .verdict.ok { background:var(--ok-bg); } .verdict.bad { background:var(--bad-bg); }
+  .verdict .big { font-size:20px; font-weight:700; } .verdict.ok .big { color:var(--ok); } .verdict.bad .big { color:var(--bad); }
+  .answer { border-left:3px solid var(--accent); padding:6px 12px; margin:10px 0; white-space:pre-wrap; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+  .actions a { color:var(--accent); font-weight:600; text-decoration:none; }
+  iframe { width:100%; height:900px; border:1px solid var(--line); border-radius:10px; background:var(--panel); margin-top:8px; }
+  .runs { list-style:none; padding:0; margin:0; } .runs li { padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .runs a { color:var(--accent); cursor:pointer; } .err { color:var(--bad); margin-top:10px; white-space:pre-wrap; }
+  .gate { max-width:460px; margin:60px auto; }
+</style>
+</head>
+<body>
+<main>
+  <section class="panel gate" id="gate" hidden>
+    <h2>Access code</h2>
+    <p class="muted">Enter the access code you were given (or open the link that contains it).</p>
+    <input id="code" type="password" autocomplete="off">
+    <div style="height:10px"></div>
+    <button class="run" onclick="saveCode()">Continue</button>
+  </section>
+
+  <div id="app" hidden>
+    <h1>Verifiable AI agent: live test</h1>
+    <p class="sub">Ask the agent anything. It runs inside an Intel TDX confidential VM on Phala Cloud, and its LLM runs on an
+      attested NVIDIA H100. After each answer, about 30 cryptographic checks run automatically, and you get the full evidence report.</p>
+
+    <div class="grid">
+      <section class="panel">
+        <label for="q">Question</label>
+        <textarea id="q" rows="3" placeholder="e.g. What are the main risks of using AI in healthcare?"></textarea>
+        <div class="chips" id="chips"></div>
+        <details>
+          <summary>System prompt (optional): change how the agent behaves</summary>
+          <div style="height:8px"></div>
+          <textarea id="sp" rows="4"></textarea>
+          <div class="muted" id="sphash"></div>
+        </details>
+        <button class="run" id="go" onclick="run()">Run test</button>
+        <div class="progress" id="progress">
+          <div class="muted" id="elapsed">0 s</div>
+          <ul class="steps" id="steps"></ul>
+        </div>
+        <div class="err" id="err"></div>
+      </section>
+
+      <section class="panel">
+        <h2>What each test proves</h2>
+        <ul class="proves">
+          <li><b>The agent's code:</b> the agent runs in genuine Intel TDX hardware, and it booted exactly the published, pinned container.</li>
+          <li><b>The prompt:</b> the exact system prompt and question that went in, signed by a key that only exists inside the agent's TEE.</li>
+          <li><b>The model:</b> the LLM ran on a TDX machine with an NVIDIA H100 in confidential mode, confirmed by NVIDIA's attestation service.</li>
+          <li><b>The answer:</b> a receipt signed by Phala's attested gateway covers the exact request and response bytes, unmodified.</li>
+          <li><b>Encryption:</b> the prompt was encrypted end to end to the gateway enclave. The report shows the one-time keys, and re-checks the math.</li>
+        </ul>
+        <p class="muted" style="margin-top:12px">Not proven: whether the answer is <i>correct</i>, or which exact model weights were loaded.
+          The checks here run in a verifier service inside the same confidential VM. For fully independent verification, run
+          <code>verify.py</code> on your own machine.</p>
+      </section>
+    </div>
+
+    <section class="panel result" id="result">
+      <div class="verdict" id="verdict"><div class="big" id="vbig"></div><div id="vtext"></div></div>
+      <div><b>Question:</b> <span id="rq"></span></div>
+      <div class="answer" id="ra"></div>
+      <div class="actions"><a id="open" target="_blank" rel="noopener">Open the full report in a new tab &rarr;</a></div>
+      <iframe id="frame" title="Evidence report"></iframe>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Earlier tests</h2>
+      <ul class="runs" id="runs"><li class="muted">None yet.</li></ul>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const EXAMPLES = ["What are two benefits of running AI inside a TEE?", "Summarize the risks of AI in healthcare in 3 bullets.",
+                  "What is 17 times 23?", "Write a one-line slogan for a privacy-first AI company."];
+const STEPS = ["Agent receives the question", "Prompt encrypted end to end to the gateway enclave", "LLM answers on an attested H100",
+               "Check the agent's TDX quote and signature", "Check the Phala gateway's Intel quote and TLS pin",
+               "Check the signed receipt covers the exact bytes", "Check the model server's quote and NVIDIA GPU attestation",
+               "Re-do the encryption math", "Build the evidence report"];
+let code = '';
+try { const m = location.hash.match(/code=([^&]+)/); if (m) { code = decodeURIComponent(m[1]); sessionStorage.setItem('demo-code', code); history.replaceState(null, '', location.pathname); } } catch (e) {}
+try { code = code || sessionStorage.getItem('demo-code') || ''; } catch (e) {}
+const auth = () => ({'Content-Type': 'application/json', 'Authorization': 'Bearer ' + code});
+
+function saveCode() { code = $('code').value.trim(); try { sessionStorage.setItem('demo-code', code); } catch (e) {} start(); }
+
+async function start() {
+  const r = await fetch('prompt', {headers: auth()});
+  if (r.status === 401) { $('gate').hidden = false; $('app').hidden = true; return; }
+  $('gate').hidden = true; $('app').hidden = false;
+  const p = await r.json(); $('sp').value = p.prompt; $('sphash').textContent = 'current prompt sha256 ' + p.sha256.slice(0, 16) + '...';
+  $('chips').innerHTML = ''; EXAMPLES.forEach(t => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = t; b.onclick = () => $('q').value = t; $('chips').append(b); });
+  loadRuns();
+}
+
+let timer;
+function showSteps(t) {
+  // The server only reports at the end; this paces the list by typical timings so the visitor sees what is being checked.
+  const at = [0, 1, 2, 4, 7, 10, 12, 16, 18];
+  $('steps').innerHTML = STEPS.map((s, i) => `<li class="${t >= (at[i + 1] ?? 99) ? 'done' : t >= at[i] ? 'now' : 'todo'}">${s}</li>`).join('');
+}
+
+async function run() {
+  const q = $('q').value.trim(); if (!q) { $('q').focus(); return; }
+  $('go').disabled = true; $('err').textContent = ''; $('progress').classList.add('on');
+  const t0 = Date.now(); showSteps(0);
+  timer = setInterval(() => { const t = (Date.now() - t0) / 1000; $('elapsed').textContent = `${t.toFixed(0)} s`; showSteps(t); }, 250);
+  try {
+    const r = await fetch('run', {method: 'POST', headers: auth(), body: JSON.stringify({question: q, system_prompt: $('sp').value})});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    $('steps').innerHTML = STEPS.map(s => `<li class="done">${s}</li>`).join('');
+    showResult(j); loadRuns(); start();
+  } catch (e) { $('err').textContent = 'Test failed: ' + e.message; }
+  finally { clearInterval(timer); $('go').disabled = false; }
+}
+
+function showResult(j) {
+  const ok = j.failed === 0;
+  $('verdict').className = 'verdict ' + (ok ? 'ok' : 'bad');
+  $('vbig').textContent = ok ? `All ${j.passed} checks passed` : `${j.failed} check(s) failed`;
+  $('vtext').textContent = ok ? `answer in ${j.answer_seconds} s, verified in ${j.total_seconds} s total` : j.failed_checks.join('; ');
+  $('rq').textContent = j.question; $('ra').textContent = j.answer;
+  $('open').href = 'report/' + j.proof_id; $('frame').src = 'report/' + j.proof_id;
+  $('result').classList.add('on'); $('result').scrollIntoView({behavior: 'smooth'});
+}
+
+async function loadRuns() {
+  const r = await fetch('runs', {headers: auth()}); if (!r.ok) return;
+  const list = await r.json(); if (!list.length) return;
+  $('runs').innerHTML = '';
+  list.forEach(x => {
+    const li = document.createElement('li');
+    const a = document.createElement('a'); a.textContent = x.question; a.onclick = () => showResult(x);
+    li.append(a, document.createTextNode(`  ·  ${x.failed ? x.failed + ' failed' : 'all ' + x.passed + ' passed'}  ·  ${new Date(x.at * 1000).toLocaleTimeString()}`));
+    $('runs').append(li);
+  });
+}
+start();
+</script>
+</body>
+</html>

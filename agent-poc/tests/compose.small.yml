@@ -1,0 +1,6 @@
+# Caps the agent at Phala tdx.small size (1 vCPU, 2 GB). Use with:
+#   docker compose -f docker-compose.yml -f tests/compose.small.yml up -d
+services:
+  agent:
+    cpus: 1
+    mem_limit: 2g
