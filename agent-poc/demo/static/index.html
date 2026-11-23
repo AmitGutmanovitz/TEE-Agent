@@ -65,6 +65,9 @@
         <label for="q">Question</label>
         <textarea id="q" rows="3" placeholder="e.g. What are the main risks of using AI in healthcare?"></textarea>
         <div class="chips" id="chips"></div>
+        <label for="llm">LLM model</label>
+        <select id="llm" style="width:100%;font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:6px"></select>
+        <div class="muted" id="llmnote" style="margin-bottom:14px"></div>
         <details>
           <summary>System prompt (optional): change how the agent behaves</summary>
           <div style="height:8px"></div>
@@ -129,7 +132,24 @@ async function start() {
   $('gate').hidden = true; $('app').hidden = false;
   const p = await r.json(); $('sp').value = p.prompt; $('sphash').textContent = 'current prompt sha256 ' + p.sha256.slice(0, 16) + '...';
   $('chips').innerHTML = ''; EXAMPLES.forEach(t => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = t; b.onclick = () => $('q').value = t; $('chips').append(b); });
-  loadRuns();
+  loadRuns(); loadModels();
+}
+
+async function loadModels() {
+  const r = await fetch('models', {headers: auth()}); if (!r.ok) return;
+  const m = await r.json(); const sel = $('llm'); const keep = sel.value; sel.innerHTML = '';
+  m.backends.forEach(b => {
+    const g = document.createElement('optgroup');
+    g.label = b.backend === 'phala' ? 'Phala: runs in a TEE, fully verifiable' : `${b.backend}: ordinary API, inference NOT verifiable`;
+    b.models.forEach(x => { const o = document.createElement('option'); o.value = `${b.backend}|${x}`; o.textContent = x;
+      o.dataset.tee = b.tee_verified ? '1' : ''; if (b.backend === m.default.backend && x === m.default.model) o.selected = true; g.append(o); });
+    sel.append(g);
+  });
+  if (keep) sel.value = keep;
+  const note = () => { const o = sel.selectedOptions[0]; $('llmnote').textContent = o && o.dataset.tee
+    ? 'All checks apply: the model runs on an attested H100, with a signed receipt.'
+    : 'Only the agent is verified: this provider gives no TEE receipt or GPU proof.'; };
+  sel.onchange = note; note();
 }
 
 let timer;
@@ -145,7 +165,8 @@ async function run() {
   const t0 = Date.now(); showSteps(0);
   timer = setInterval(() => { const t = (Date.now() - t0) / 1000; $('elapsed').textContent = `${t.toFixed(0)} s`; showSteps(t); }, 250);
   try {
-    const r = await fetch('run', {method: 'POST', headers: auth(), body: JSON.stringify({question: q, system_prompt: $('sp').value})});
+    const r = await fetch('run', {method: 'POST', headers: auth(), body: JSON.stringify({question: q, system_prompt: $('sp').value,
+      backend: ($('llm').value || '|').split('|')[0] || null, model: ($('llm').value || '|').split('|')[1] || null})});
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || r.statusText);
     $('steps').innerHTML = STEPS.map(s => `<li class="done">${s}</li>`).join('');
@@ -157,9 +178,11 @@ async function run() {
 function showResult(j) {
   const ok = j.failed === 0;
   $('verdict').className = 'verdict ' + (ok ? 'ok' : 'bad');
-  $('vbig').textContent = ok ? `All ${j.passed} checks passed` : `${j.failed} check(s) failed`;
+  $('vbig').textContent = !ok ? `${j.failed} check(s) failed`
+    : j.tee_verified_inference === false ? `Agent verified (${j.passed} checks), inference not verifiable` : `All ${j.passed} checks passed`;
   $('vtext').textContent = ok ? `answer in ${j.answer_seconds} s, verified in ${j.total_seconds} s total` : j.failed_checks.join('; ');
-  $('rq').textContent = j.question; $('ra').textContent = j.answer;
+  $('rq').textContent = `${j.question}   [${j.backend || ''} / ${j.model || ''}${j.tee_verified_inference === false ? ', inference NOT TEE-verified' : ''}]`;
+  $('ra').textContent = j.answer;
   $('open').href = 'report/' + j.proof_id; $('frame').src = 'report/' + j.proof_id;
   $('result').classList.add('on'); $('result').scrollIntoView({behavior: 'smooth'});
 }

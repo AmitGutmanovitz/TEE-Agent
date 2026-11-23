@@ -183,7 +183,17 @@ def verify_model_server(r: Report, sess: dict, session_id: str, served_at: int |
     raw = base64.b64decode(sess["evidence"]["data"].split(",", 1)[1])
     r.check("sha256:" + h(raw) == sess["evidence"]["digest"], "D2. Evidence digest",
             "the raw evidence bundle is the one named in the session")
-    a = json.loads(raw)["all_attestations"][0]
+    bundle = json.loads(raw)
+    if "all_attestations" not in bundle:
+        # Third-party TEE providers behind Phala's gateway use their own evidence formats; this verifier
+        # re-checks only Phala-hosted model servers itself. Report what the gateway's verifier concluded.
+        c = sess.get("claims", {})
+        r.info("D3-D8. Model server evidence", f"provider '{sess.get('upstream_name')}' uses a different evidence format "
+               f"({sess.get('verifier_id')}); not re-verified here. Gateway verifier claims: "
+               f"tee_attested={c.get('tee_attested', {}).get('status')}, gpu_attested={c.get('gpu_attested', {}).get('status')}, "
+               f"tcb_up_to_date={c.get('tcb_up_to_date', {}).get('status')}")
+        return
+    a = bundle["all_attestations"][0]
     r.artifacts["model_server_evidence"] = a
     quote = bytes.fromhex(a["intel_quote"])
 

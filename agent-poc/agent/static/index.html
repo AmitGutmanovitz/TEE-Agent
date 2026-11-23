@@ -39,6 +39,7 @@
   <section>
     <h2>Chat</h2>
     <div id="log"></div>
+    <div class="row"><label for="llm" class="hash">LLM model</label><select id="llm" style="flex:1;min-width:240px;font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px"></select></div>
     <div class="row"><input id="msg" placeholder="Type a message and press Enter" onkeydown="if(event.key==='Enter')send()"></div>
     <div class="row"><button onclick="send()">Send</button><button class="ghost" onclick="reset()">New conversation</button></div>
   </section>
@@ -78,7 +79,8 @@ function add(who, text, proof) {
 }
 async function send() {
   const m = $('msg').value.trim(); if (!m) return; $('msg').value = ''; add('You', m);
-  const r = await fetch('/chat', {method:'POST', headers: hdrs(), body: JSON.stringify({message: m})});
+  const [backend, model] = ($('llm').value || '|').split('|');
+  const r = await fetch('/chat', {method:'POST', headers: hdrs(), body: JSON.stringify({message: m, backend: backend || null, model: model || null})});
   const j = await r.json();
   if (!r.ok) return add('Error', j.detail || r.statusText);
   const s = j.statement, tee = s.tee_verified_inference ? 'TEE-verified inference' : 'NOT TEE-verified';
@@ -91,7 +93,18 @@ fetch('/info').then(r => r.json()).then(i => {
   if (!i.auth.admin && !i.auth.chat) $('authbox').style.display = 'none';
 });
 async function reset() { await fetch('/reset', {method:'POST', headers: hdrs(), body:'{}'}); $('log').innerHTML = ''; }
-loadPrompt();
+async function loadModels() {
+  const m = await fetch('/models').then(r => r.json());
+  const sel = $('llm'); sel.innerHTML = '';
+  m.backends.forEach(b => {
+    const g = document.createElement('optgroup');
+    g.label = `${b.backend} ${b.tee_verified ? '(TEE-verified inference)' : '(NOT TEE-verified)'}`;
+    b.models.forEach(x => { const o = document.createElement('option'); o.value = `${b.backend}|${x}`; o.textContent = x;
+      if (b.backend === m.default.backend && x === m.default.model) o.selected = true; g.append(o); });
+    sel.append(g);
+  });
+}
+loadPrompt(); loadModels();
 </script>
 </body>
 </html>

@@ -50,22 +50,33 @@ BACKENDS = {
               "path": "/v1/chat/completions",
               "key": os.environ.get("PHALA_API_KEY", ""),
               "model": os.environ.get("PHALA_MODEL", "qwen/qwen-2.5-7b-instruct"),
+              # Chat models hosted by Phala itself (providers == ["phala"]), so verify.py can re-check the
+              # model server's own TDX + GPU evidence (layer D). Cheapest first (Phala price list, 2026-11-20).
+              "models": ["qwen/qwen-2.5-7b-instruct", "phala/gemma-4-26b-a4b-uncensored",
+                         "phala/qwen3.8-27b-uncensored", "phala/deepseek-v4.1-flash-1017-uncensored"],
               "tee_verified": True},
     "gemini": {"base": "https://generativelanguage.googleapis.com",
                "path": "/v1beta/openai/chat/completions",
                "key": os.environ.get("GEMINI_API_KEY", ""),
                "model": os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+               "models": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
                "tee_verified": False},
     "openai": {"base": os.environ.get("OPENAI_BASE", "https://api.openai.com"),
                "path": "/v1/chat/completions",
                "key": os.environ.get("OPEN_AI_API_KEY", ""),
                "model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+               "models": ["gpt-4.1-mini", "gpt-4o-mini", "gpt-5-mini", "gpt-5-nano"],
                "tee_verified": False},
 }
+for _b in BACKENDS.values():
+    _b["key"] = _b["key"].strip()
+    if _b["model"] not in _b["models"]:
+        _b["models"].insert(0, _b["model"])
 if BACKEND not in BACKENDS:
     raise SystemExit(f"LLM_BACKEND must be one of {list(BACKENDS)}")
+# Defaults (from LLM_BACKEND); each /chat request may pick another backend + model from the lists above.
 CFG = BACKENDS[BACKEND]
-BASE, API_KEY, MODEL = CFG["base"].rstrip("/"), CFG["key"].strip(), CFG["model"]
+BASE, API_KEY, MODEL = CFG["base"].rstrip("/"), CFG["key"], CFG["model"]
 DEFAULT_PROMPT = os.environ.get(
     "SYSTEM_PROMPT", "You are a concise, helpful assistant. Answer in at most three sentences.")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -74,7 +85,8 @@ PROOF_DB = os.environ.get("PROOF_DB", "/data/proofs.db")
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "1000"))
 LLM_RETRIES = 3
 # End-to-end encryption to the attested Phala gateway (ACI E2EE v2). Only for the phala backend.
-E2EE = BACKEND == "phala" and os.environ.get("E2EE", "1") == "1"
+E2EE_ON = os.environ.get("E2EE", "1") == "1"
+E2EE = BACKEND == "phala" and E2EE_ON
 
 
 def sha256(b: bytes) -> str:
@@ -153,6 +165,8 @@ class PromptIn(BaseModel):
 class ChatIn(BaseModel):
     message: str = ""
     session: str | None = None
+    backend: str | None = None   # optional per-request choice, see GET /models
+    model: str | None = None
 
 
 @app.get("/")
@@ -188,7 +202,7 @@ def gateway_e2ee_key() -> dict:
     if _gw["keyset"] and time.time() - _gw["fetched"] < 600:
         return _gw["keyset"]
     nonce = os.urandom(32).hex()
-    att = http.get(f"{BASE}/v1/aci/attestation", params={"nonce": nonce}).json()
+    att = http.get(f"{BACKENDS['phala']['base'].rstrip('/')}/v1/aci/attestation", params={"nonce": nonce}).json()
     ks = att["attestation"]["workload_keyset"]
     digest = "sha256:" + sha256(rfc8785.dumps(ks))
     stmt = json.dumps({"keyset_digest": digest, "nonce": nonce, "purpose": "aci.report_data.v1"},
@@ -201,9 +215,9 @@ def gateway_e2ee_key() -> dict:
     return _gw["keyset"]
 
 
-def build_request(messages: list) -> tuple[bytes, dict, dict]:
+def build_request(messages: list, MODEL: str, use_e2ee: bool) -> tuple[bytes, dict, dict]:
     """Returns (wire body bytes, extra headers, e2ee trace). Fresh keys/nonce each call (no replay on retry)."""
-    if not E2EE:
+    if not use_e2ee:
         return json.dumps({"model": MODEL, "messages": messages}).encode(), {}, {}
     gw = gateway_e2ee_key()
     peer = gw["key"]["public_key"]
@@ -224,13 +238,14 @@ def build_request(messages: list) -> tuple[bytes, dict, dict]:
     return json.dumps({"model": MODEL, "messages": wire_msgs}).encode(), headers, trace
 
 
-def call_llm(messages: list, stages: list, t0: float) -> tuple[httpx.Response, bytes, dict, dict]:
+def call_llm(messages: list, stages: list, t0: float, cfg: dict, model: str,
+             use_e2ee: bool) -> tuple[httpx.Response, bytes, dict, dict]:
     """POST to the LLM, retrying on 429 / 5xx with exponential backoff."""
     for attempt in range(LLM_RETRIES + 1):
-        req_bytes, extra, trace = build_request(messages)
+        req_bytes, extra, trace = build_request(messages, model, use_e2ee)
         stages.append((ms(t0), "request built" + (" + E2EE-encrypted" if trace else ""), f"{len(req_bytes)} bytes"))
-        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json", **extra}
-        r = http.post(f"{BASE}{CFG['path']}", content=req_bytes, headers=headers)
+        headers = {"Authorization": f"Bearer {cfg['key']}", "Content-Type": "application/json", **extra}
+        r = http.post(f"{cfg['base'].rstrip('/')}{cfg['path']}", content=req_bytes, headers=headers)
         stages.append((ms(t0), f"LLM responded HTTP {r.status_code}", f"{len(r.content)} bytes"))
         if r.status_code != 429 and r.status_code < 500 or attempt == LLM_RETRIES:
             return r, req_bytes, extra, trace
@@ -246,8 +261,17 @@ def ms(t0: float) -> int:
 
 @app.post("/chat", dependencies=[Depends(chat_auth)])
 def chat(body: ChatIn):
-    if not API_KEY:
-        raise HTTPException(500, f"API key for backend '{BACKEND}' is not set")
+    BACKEND = (body.backend or globals()["BACKEND"]).lower()
+    if BACKEND not in BACKENDS:
+        raise HTTPException(400, f"unknown backend '{BACKEND}'")
+    CFG = BACKENDS[BACKEND]
+    MODEL = body.model or CFG["model"]
+    if MODEL not in CFG["models"]:
+        raise HTTPException(400, f"model '{MODEL}' is not offered for backend '{BACKEND}' (see GET /models)")
+    if not CFG["key"]:
+        raise HTTPException(400, f"API key for backend '{BACKEND}' is not set on this server")
+    BASE = CFG["base"].rstrip("/")
+    use_e2ee = BACKEND == "phala" and E2EE_ON
     t0 = time.perf_counter()
     stages = [(0, "request received by agent", f"session={body.session or 'default'}")]
     sid = body.session or "default"
@@ -261,7 +285,7 @@ def chat(body: ChatIn):
 
     # Send exact bytes we control, so we can hash precisely what went on the wire.
     t_llm = time.perf_counter()
-    r, req_bytes, req_headers, trace = call_llm(messages, stages, t0)
+    r, req_bytes, req_headers, trace = call_llm(messages, stages, t0, CFG, MODEL, use_e2ee)
     latency_ms = int((time.perf_counter() - t_llm) * 1000)
     resp_bytes = r.content
     if r.status_code != 200:
@@ -347,6 +371,14 @@ def info():
     return {"backend": BACKEND, "model": MODEL, "tee_verified_inference": CFG["tee_verified"],
             "tee_mode": tee.mode, "agent_pubkey": SIGNER_PUB.hex(), "e2ee": E2EE,
             "auth": {"admin": bool(ADMIN_TOKEN), "chat": bool(CHAT_TOKEN)}}
+
+
+@app.get("/models")
+def models():
+    """Backends that have a key on this server, with their selectable models (public: no secrets)."""
+    return {"default": {"backend": BACKEND, "model": MODEL},
+            "backends": [{"backend": b, "tee_verified": c["tee_verified"], "default_model": c["model"],
+                          "models": c["models"]} for b, c in BACKENDS.items() if c["key"]]}
 
 
 @app.get("/metrics", dependencies=[Depends(admin_auth)])

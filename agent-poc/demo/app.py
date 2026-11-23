@@ -53,6 +53,8 @@ def check_code(authorization: str | None) -> None:
 class RunIn(BaseModel):
     question: str
     system_prompt: str | None = None
+    backend: str | None = None
+    model: str | None = None
 
 
 @app.get("/")
@@ -64,6 +66,12 @@ def page():
 def prompt(authorization: str | None = Header(default=None)):
     check_code(authorization)
     return requests.get(f"{AGENT}/system-prompt", headers=A, timeout=30).json()
+
+
+@app.get("/models")
+def models(authorization: str | None = Header(default=None)):
+    check_code(authorization)
+    return requests.get(f"{AGENT}/models", timeout=30).json()
 
 
 @app.get("/runs")
@@ -91,7 +99,8 @@ def run(body: RunIn, authorization: str | None = Header(default=None)):
         if body.system_prompt is not None and body.system_prompt.strip():
             r = requests.put(f"{AGENT}/system-prompt", json={"prompt": body.system_prompt.strip()}, headers=A, timeout=30)
             r.raise_for_status()
-        r = requests.post(f"{AGENT}/chat", json={"message": body.question.strip(), "session": os.urandom(8).hex()},
+        r = requests.post(f"{AGENT}/chat", json={"message": body.question.strip(), "session": os.urandom(8).hex(),
+                                                 "backend": body.backend, "model": body.model},
                           headers=A, timeout=180)
         if r.status_code != 200:
             raise HTTPException(502, f"agent error {r.status_code}: {r.text[:300]}")
@@ -105,6 +114,8 @@ def run(body: RunIn, authorization: str | None = Header(default=None)):
         summary = {
             "proof_id": chat["proof_id"], "question": body.question.strip(), "answer": chat["answer"],
             "system_prompt_sha256": chat["statement"]["system_prompt_sha256"],
+            "backend": chat["statement"]["backend"], "model": chat["statement"]["model"],
+            "tee_verified_inference": chat["statement"]["tee_verified_inference"],
             "passed": sum(1 for i in rep.items if i[1] == "PASS"), "failed": sum(1 for i in rep.items if i[1] == "FAIL"),
             "failed_checks": [i[2] for i in rep.items if i[1] == "FAIL"],
             "answer_seconds": round(t_answer, 1), "total_seconds": round(time.time() - t0, 1),

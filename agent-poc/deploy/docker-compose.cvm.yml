@@ -1,6 +1,6 @@
 services:
   agent:
-    image: amitgut3210/verifiable-agent@sha256:24742b4b0398a90292748cfcfae2d7eecbc36e6173c7d492afc69858d811372b # agent-image
+    image: amitgut3210/verifiable-agent@sha256:acc5851baa5e0c38859f2847c2c0216c1e56fa519822052b9d0f3b31600c0736 # agent-image
     ports:
       - "8000:8000"
     volumes:
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   demo:
-    image: amitgut3210/verifiable-agent-demo@sha256:24e0b1b68c65d30efc8cdde3a296855be2cc3ebb777ae55810a30bdab31f26cd # demo-image
+    image: amitgut3210/verifiable-agent-demo@sha256:bbc69a14fd5a652abcd646cb8e98113be41b49fda4d2ac94ead3754bce5b3efe # demo-image
     ports:
       - "8080:8080"
     environment:

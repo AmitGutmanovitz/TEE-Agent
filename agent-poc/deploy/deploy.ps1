@@ -103,4 +103,11 @@ $docker = @("run", "--rm", "-v", "${Deploy}:/deploy", "-w", "/deploy/terraform",
     "-e", "PHALA_CLOUD_API_KEY", "-e", "TF_VAR_phala_api_key", "-e", "TF_VAR_admin_token", "-e", "TF_VAR_chat_token", "-e", "TF_VAR_demo_token", "-e", "TF_VAR_openai_api_key",
     "hashicorp/terraform:1.15")
 if (-not (Test-Path (Join-Path $Deploy "terraform\.terraform"))) { docker @docker init -input=false }
-docker @docker @tfArgs
+# Phala answers 409 while a previous update is still being applied to the CVM: wait and retry.
+for ($attempt = 1; $attempt -le 6; $attempt++) {
+    $out = docker @docker @tfArgs 2>&1 | ForEach-Object { "$_" }
+    $out | Write-Output
+    if (-not (($out -join "`n") -match "status 409")) { break }
+    Write-Host "Phala reports another operation in progress; retrying in 30 s ($attempt/6)..."
+    Start-Sleep 30
+}

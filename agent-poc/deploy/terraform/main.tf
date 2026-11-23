@@ -56,6 +56,12 @@ resource "phala_cvm_power" "agent" {
   state                = var.power_state
   wait_for_state       = true
   wait_timeout_seconds = 900
+
+  # The CVM id doesn't change on app updates; don't recreate this resource just because the
+  # provider reports primary_cvm_id as "known after apply" during an update.
+  lifecycle {
+    ignore_changes = [cvm_id]
+  }
 }
 
 # Scaling: more CVMs of the same app (same app_id => same compose, same KMS-derived signing key).
