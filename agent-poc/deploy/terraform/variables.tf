@@ -40,6 +40,13 @@ variable "phala_api_key" {
   sensitive   = true
 }
 
+variable "openai_api_key" {
+  description = "OpenAI key for LLM_BACKEND=openai (optional; empty if unused)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "admin_token" {
   description = "Bearer token allowed to change the system prompt"
   type        = string

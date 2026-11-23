@@ -209,6 +209,8 @@ Everything is in `agent-poc/deploy`:
 
 Add these to `agent-poc/.env` first: `PHALA_CLOUD_API_KEY` (Phala Cloud → Settings → API Keys, `phak_...`) and
 `PHALA_API_KEY`. `ADMIN_TOKEN` and `CHAT_TOKEN` are generated on the first run if they're missing.
+Optionally add `OPEN_AI_API_KEY`. It's passed to the CVM as an encrypted secret and used when `LLM_BACKEND=openai`
+is set in `docker-compose.cvm.yml`.
 
 ```powershell
 docker login

@@ -9,6 +9,7 @@ services:
     environment:
       - LLM_BACKEND=phala
       - PHALA_API_KEY=${PHALA_API_KEY}
+      - OPEN_AI_API_KEY=${OPEN_AI_API_KEY}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
       - CHAT_TOKEN=${CHAT_TOKEN}
       - PYTHONUNBUFFERED=1

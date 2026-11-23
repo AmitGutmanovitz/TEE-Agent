@@ -90,6 +90,7 @@ $env:TF_VAR_phala_api_key = $vals["PHALA_API_KEY"]
 $env:TF_VAR_admin_token = $vals["ADMIN_TOKEN"]
 $env:TF_VAR_chat_token = $vals["CHAT_TOKEN"]
 $env:TF_VAR_demo_token = $vals["DEMO_TOKEN"]
+$env:TF_VAR_openai_api_key = if ($vals["OPEN_AI_API_KEY"]) { $vals["OPEN_AI_API_KEY"] } else { "" }
 $tfArgs = switch ($Action) {
     "plan" { @("plan", "-input=false") }
     "apply" { @("apply", "-input=false", "-auto-approve") }
@@ -99,7 +100,7 @@ $tfArgs = switch ($Action) {
     "destroy" { @("destroy", "-input=false", "-auto-approve") }
 }
 $docker = @("run", "--rm", "-v", "${Deploy}:/deploy", "-w", "/deploy/terraform",
-    "-e", "PHALA_CLOUD_API_KEY", "-e", "TF_VAR_phala_api_key", "-e", "TF_VAR_admin_token", "-e", "TF_VAR_chat_token", "-e", "TF_VAR_demo_token",
+    "-e", "PHALA_CLOUD_API_KEY", "-e", "TF_VAR_phala_api_key", "-e", "TF_VAR_admin_token", "-e", "TF_VAR_chat_token", "-e", "TF_VAR_demo_token", "-e", "TF_VAR_openai_api_key",
     "hashicorp/terraform:1.15")
 if (-not (Test-Path (Join-Path $Deploy "terraform\.terraform"))) { docker @docker init -input=false }
 docker @docker @tfArgs

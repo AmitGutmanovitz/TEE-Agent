@@ -31,7 +31,8 @@ resource "phala_app" "agent" {
   # NOTE: plaintext values are kept in terraform.tfstate. Keep state local and git-ignored
   # (or use an encrypted remote backend).
   env = {
-    PHALA_API_KEY = var.phala_api_key
+    PHALA_API_KEY   = var.phala_api_key
+    OPEN_AI_API_KEY = var.openai_api_key
     ADMIN_TOKEN   = var.admin_token
     CHAT_TOKEN    = var.chat_token
     DEMO_TOKEN    = var.demo_token
