@@ -43,7 +43,9 @@ resource "phala_app" "agent" {
   public_sysinfo = true
   public_tcbinfo = true
 
-  wait_for_ready       = true
+  # Don't wait here: if the CVM is stopped, an update can never become "ready" until the power
+  # resource below starts it (that resource waits for the "running" state instead).
+  wait_for_ready       = false
   wait_timeout_seconds = 900
 }
 

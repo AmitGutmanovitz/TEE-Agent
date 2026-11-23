@@ -312,6 +312,12 @@ def run_all(proof_id: str, agent: str, expect_compose: str | None = None) -> tup
         debug = d.json() if d.status_code == 200 else None
     rep = Report()
     verify_agent(rep, agent, proof, expect_compose)
+    if not proof["statement"].get("tee_verified_inference"):
+        rep.section(f"Layers B-E: LLM inference ({proof['statement'].get('backend')})")
+        rep.info("B-E. Inference evidence",
+                 f"NOT AVAILABLE: this answer came from '{proof['statement'].get('backend')}', an ordinary LLM API "
+                 "with no TEE receipt or GPU attestation. Only the agent side (layer A) is verified.")
+        return rep, proof, debug
     keyset = verify_gateway(rep)
     verify_receipt(rep, keyset, proof, api_key)
     if debug is not None:
